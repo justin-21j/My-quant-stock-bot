@@ -1,0 +1,80 @@
+﻿version: '3.8'
+
+services:
+  # 데이터베이스 서비스 (PostgreSQL)
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: stock_postgres_db
+    restart: always
+    environment:
+      - POSTGRES_USER=${DB_USER}
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${DB_NAME}
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - stock_network
+
+  # 주가 데이터 수집기 서비스
+  data-collector:
+    build: ./collector
+    container_name: stock_data_collector
+    restart: on-failure
+    depends_on:
+      - postgres-db
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    networks:
+      - stock_network
+
+# [추가] 지표 분석 엔진 서비스
+  analyzer-engine:
+    build: ./analyzer
+    container_name: stock_analyzer_engine
+    restart: on-failure
+    depends_on:
+      postgres-db:
+        condition: service_started
+      data-collector:
+        # 🚨 [핵심 변경] 수집기 컨테이너가 작업을 완전히 끝내고 정상 종료(Exit 0)될 때까지 대기합니다.
+        condition: service_completed_successfully 
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - TELEGRAM_TOKEN=8256130810:AAEFVaQOTuZMxnbftAPpXEcl9YmZzhzEfxw
+      - TELEGRAM_CHAT_ID=8706260718
+    networks:
+      - stock_network
+
+# 🚨 [추가] 시각화 대시보드 웹 서비스
+  web-dashboard:
+    build: ./dashboard
+    container_name: stock_web_dashboard
+    restart: always
+    ports:
+      - "8501:8501" # 웹 브라우저 주소창에 localhost:8501로 접속하게 해줍니다.
+    depends_on:
+      - postgres-db
+      - analyzer-engine
+    environment:
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+    networks:
+      - stock_network
+
+volumes:
+  postgres_data:
+
+networks:
+  stock_network:
+    driver: bridge
+

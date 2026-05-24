@@ -1,0 +1,14 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+# 분석 코드와 백테스터 코드를 모두 복사
+COPY analyze.py .
+COPY backtester.py .
+COPY telegram_notifier.py .
+
+# analyze.py 실행이 끝나면 이어서 backtester.py가 실행되도록 설정, 세 개의 스크립트를 순서대로 실행
+CMD ["sh", "-c", "python analyze.py && python backtester.py && python telegram_notifier.py"]
