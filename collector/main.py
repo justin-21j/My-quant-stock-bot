@@ -4,6 +4,7 @@ import requests
 import pandas as pd
 import yfinance as yf
 from sqlalchemy import create_engine, text
+import io  # 🚨 StringIO 변환을 위해 이 줄을 추가합니다.
 
 def get_db_engine():
     db_host = os.getenv("DB_HOST", "localhost")
@@ -24,7 +25,10 @@ def update_top10_via_naver(engine):
     try:
         response = requests.get(url, headers=headers)
         # 웹페이지 내 테이블 추출
-        dfs = pd.read_html(response.text)
+        # 🚨 기존 코드: dfs = pd.read_html(response.text)
+        # 💡 수정 코드: 문자열을 StringIO 객체로 감싸서 안전하게 전달합니다.
+        dfs = pd.read_html(io.StringIO(response.text))
+
         df = dfs[1] # 주가 데이터가 담긴 메인 테이블 선택
         
         # 결측치 제거 및 종목명이 있는 행만 필터링
@@ -114,9 +118,49 @@ def main():
         except Exception:
             print(f"연결 재시도 중... ({i+1}/5)"); time.sleep(5)
             
+    # 🚨 [새로 추가된 로직]: 테이블이 없을 경우 자동으로 생성하는 쿼리 실행
+    print("기반 인프라 테이블 존재 여부 확인 및 자동 생성 중...")
+    init_tables_query = """
+        -- 1. 종목 마스터 테이블
+        CREATE TABLE IF NOT EXISTS stock_info (
+            ticker VARCHAR(20) PRIMARY KEY,
+            ticker_name VARCHAR(50) NOT NULL
+        );
+
+        -- 2. 일별 주가 원시 데이터 테이블
+        CREATE TABLE IF NOT EXISTS daily_stock_prices (
+            date DATE NOT NULL,
+            ticker VARCHAR(20) NOT NULL,
+            open NUMERIC,
+            high NUMERIC,
+            low NUMERIC,
+            close NUMERIC,
+            volume BIGINT,
+            CONSTRAINT unique_date_ticker UNIQUE (date, ticker)
+        );
+
+        -- 3. 기술적 분석 지표 테이블
+        CREATE TABLE IF NOT EXISTS technical_indicators (
+            date DATE NOT NULL,
+            ticker VARCHAR(20) NOT NULL,
+            close NUMERIC,
+            ma5 NUMERIC,
+            ma20 NUMERIC,
+            ma60 NUMERIC,
+            rsi14 NUMERIC,
+            CONSTRAINT unique_indicator_date_ticker UNIQUE (date, ticker)
+        );
+    """
+    try:
+        with engine.begin() as conn:
+            conn.execute(text(init_tables_query))
+        print("기반 테이블 검증 및 생성 완료!")
+    except Exception as e:
+        print(f"🚨 초기 테이블 생성 중 예외 발생 (디비 권한 확인 필요): {e}")
+
     # 네이버 파이프라인으로 유동적 종목 확보
     target_tickers = update_top10_via_naver(engine)
-    
+        
     start_date = "2024-01-01"
     end_date = "2026-05-22"
     
